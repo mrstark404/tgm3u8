@@ -3,10 +3,10 @@ import math
 from flask import Flask, Response
 from pyrogram import Client
 
-API_ID = int(os.getenv("27490071"))
-API_HASH = os.getenv("b30b04232ede5e12b7891976f4f1df6e")
-BOT_TOKEN = os.getenv("8454723419:AAEsYdkVnJPvH_5u9W_-6Z6Mc7YXs-j6z_Q")
-CHANNEL_ID = int(os.getenv("-1002907246210"))
+API_ID = int(os.getenv("API_ID"))
+API_HASH = os.getenv("API_HASH")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
 SEGMENT_SIZE = 5 * 1024 * 1024  # 5 MB chunks
 
 tg = Client("stream_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)

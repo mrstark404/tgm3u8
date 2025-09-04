@@ -1,5 +1,5 @@
-from flask import Flask, request, redirect, abort
-import requests
+from flask import Flask, request, redirect
+from playwright.sync_api import sync_playwright
 import re
 
 app = Flask(__name__)
@@ -10,29 +10,21 @@ def fetch_m3u8():
     if not url:
         return "No URL provided", 400
 
-    # Default headers to mimic a real browser
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Referer": url
-    }
-
     try:
-        # Fetch the page with a session to handle cookies
-        session = requests.Session()
-        resp = session.get(url, headers=headers, timeout=10, allow_redirects=True)
-        if resp.status_code != 200:
-            return "Failed to fetch URL", 500
-        html = resp.text
+        with sync_playwright() as p:
+            # Launch headless Chromium
+            browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"])
+            page = browser.new_page()
+            page.goto(url, timeout=15000)  # 15s timeout
+            html = page.content()
+            browser.close()
     except Exception as e:
-        return f"Error: {str(e)}", 500
+        return f"Error fetching page: {str(e)}", 500
 
-    # Regex to find .m3u8 links (both http and https)
+    # Find any .m3u8 link
     match = re.search(r'https?://[^\s\'"]+\.m3u8[^\s\'"]*', html)
     if match:
-        m3u8_url = match.group(0)
-        return redirect(m3u8_url)
+        return redirect(match.group(0))
     else:
         return "No m3u8 link found", 404
 

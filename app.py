@@ -1,58 +1,40 @@
-import os
-import math
-from flask import Flask, Response
-from pyrogram import Client
+from flask import Flask, request, redirect, abort
+import requests
+import re
 
-API_ID = int(os.getenv("API_ID"))
-API_HASH = os.getenv("API_HASH")
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
-SEGMENT_SIZE = 5 * 1024 * 1024  # 5 MB chunks
-
-tg = Client("stream_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 app = Flask(__name__)
 
-@app.route("/stream/<int:message_id>/master.m3u8")
-def master_playlist(message_id):
-    with tg:
-        msg = tg.get_messages(CHANNEL_ID, message_id)
-        file = msg.video or msg.document
-        if not file:
-            return "No video found", 404
+@app.route('/')
+def fetch_m3u8():
+    url = request.args.get('url')
+    if not url:
+        return "No URL provided", 400
 
-        file_size = file.file_size
-        total_segments = math.ceil(file_size / SEGMENT_SIZE)
+    # Default headers to mimic a real browser
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Referer": url
+    }
 
-        playlist = "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:10\n#EXT-X-MEDIA-SEQUENCE:0\n"
-        for i in range(total_segments):
-            playlist += f"#EXTINF:10.0,\n/stream/{message_id}/segment/{i}\n"
-        playlist += "#EXT-X-ENDLIST\n"
+    try:
+        # Fetch the page with a session to handle cookies
+        session = requests.Session()
+        resp = session.get(url, headers=headers, timeout=10, allow_redirects=True)
+        if resp.status_code != 200:
+            return "Failed to fetch URL", 500
+        html = resp.text
+    except Exception as e:
+        return f"Error: {str(e)}", 500
 
-        return Response(playlist, mimetype="application/vnd.apple.mpegurl")
-
-@app.route("/stream/<int:message_id>/segment/<int:seg_id>")
-def stream_segment(message_id, seg_id):
-    with tg:
-        msg = tg.get_messages(CHANNEL_ID, message_id)
-        file = msg.video or msg.document
-        if not file:
-            return "No video", 404
-
-        file_size = file.file_size
-        file_id = file.file_id
-        total_segments = math.ceil(file_size / SEGMENT_SIZE)
-
-        if seg_id >= total_segments:
-            return "Segment not found", 404
-
-        start = seg_id * SEGMENT_SIZE
-        end = min(start + SEGMENT_SIZE - 1, file_size - 1)
-
-        def generate():
-            for chunk in tg.stream_media(file_id, offset=start, limit=(end - start + 1)):
-                yield chunk
-
-        return Response(generate(), mimetype="video/MP2T")
+    # Regex to find .m3u8 links (both http and https)
+    match = re.search(r'https?://[^\s\'"]+\.m3u8[^\s\'"]*', html)
+    if match:
+        m3u8_url = match.group(0)
+        return redirect(m3u8_url)
+    else:
+        return "No m3u8 link found", 404
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
+    app.run(debug=True)

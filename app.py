@@ -1,32 +1,35 @@
-from flask import Flask, request, redirect
-from playwright.sync_api import sync_playwright
-import re
+# app.py
+from flask import Flask, request, redirect, abort
+import yt_dlp
+import os
 
 app = Flask(__name__)
 
 @app.route('/')
 def fetch_m3u8():
-    url = request.args.get('url')
-    if not url:
-        return "No URL provided", 400
+    video_url = request.args.get('url')
+    if not video_url:
+        return abort(400, description="Missing 'url' parameter. Usage: /?url=<video_url>")
 
     try:
-        with sync_playwright() as p:
-            # Launch headless Chromium
-            browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"])
-            page = browser.new_page()
-            page.goto(url, timeout=15000)  # 15s timeout
-            html = page.content()
-            browser.close()
+        # Use yt-dlp to extract info without downloading
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'format': 'best[protocol^=m3u8]',  # Prefer HLS (m3u8) formats
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(video_url, download=False)
+            # Get the URL of the m3u8 manifest
+            m3u8_url = info['url'] if 'url' in info else None
+
+            if m3u8_url and m3u8_url.endswith('.m3u8'):
+                return redirect(m3u8_url)
+            else:
+                return abort(404, description="No m3u8 link found for the provided URL.")
     except Exception as e:
-        return f"Error fetching page: {str(e)}", 500
+        return abort(500, description=f"Error processing URL: {str(e)}")
 
-    # Find any .m3u8 link
-    match = re.search(r'https?://[^\s\'"]+\.m3u8[^\s\'"]*', html)
-    if match:
-        return redirect(match.group(0))
-    else:
-        return "No m3u8 link found", 404
-
-if __name__ == "__main__":
-    app.run(debug=True)
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)

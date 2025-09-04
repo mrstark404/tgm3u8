@@ -1,30 +1,33 @@
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import RedirectResponse
-from playwright.async_api import async_playwright
-import asyncio
+from flask import Flask, request, redirect
+import yt_dlp
 
-app = FastAPI()
+app = Flask(__name__)
 
-async def get_m3u8(url: str) -> str:
-    try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            page = await browser.new_page()
-            await page.goto(url, timeout=15000)
-            
-            # Search for m3u8 links in the page
-            content = await page.content()
-            m3u8_links = [line.split('"')[0] for line in content.split() if ".m3u8" in line]
-            
-            await browser.close()
-            if m3u8_links:
-                return m3u8_links[0]
+@app.route('/')
+def extract_m3u8():
+    video_url = request.args.get('url')
+    if not video_url:
+        return "Please provide a 'url' parameter.", 400
+
+    ydl_opts = {
+        'quiet': True,
+        'no_warnings': True,
+    }
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        try:
+            info = ydl.extract_info(video_url, download=False)
+            # Look for an HLS (m3u8) format URL
+            hls_url = next((f['url'] for f in info.get('formats', []) if '.m3u8' in f['url']), None)
+            if hls_url:
+                return redirect(hls_url)
+            # Fallback to the main URL if it's an m3u8
+            elif 'url' in info and '.m3u8' in info['url']:
+                return redirect(info['url'])
             else:
-                raise HTTPException(status_code=404, detail="No m3u8 found")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+                return "No m3u8 link found.", 404
+        except Exception as e:
+            return f"Error: {str(e)}", 500
 
-@app.get("/fetch")
-async def fetch_m3u8(url: str = Query(..., description="URL to fetch m3u8 from")):
-    m3u8_link = await get_m3u8(url)
-    return RedirectResponse(url=m3u8_link)
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
